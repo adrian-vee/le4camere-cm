@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+ 
+}
+
+enum ChannelName {
+  booking
+  expedia
+  airbnb
+  direct
+  other
+}
+
+enum ProviderType {
+  mock
+  ical
+  connectivity_api
+  ota_direct
+}
+
+enum ReservationStatus {
+  confirmed
+  modified
+  cancelled
+}
+
+enum SyncJobType {
+  push_ari
+  pull_reservations
+}
+
+enum SyncJobStatus {
+  pending
+  running
+  done
+  failed
+}
+
+enum SyncDirection {
+  inbound
+  outbound
+}
+
+enum DocumentType {
+  receipt
+  proforma
+}
+
+model RoomType {
+  id            String           @id @default(cuid())
+  name          String
+  code          String           @unique
+  baseOccupancy Int              @default(2)
+  maxOccupancy  Int              @default(2)
+  totalUnits    Int
+  rooms         Room[]
+  ratePlans     RatePlan[]
+  inventoryDays InventoryDay[]
+  reservations  Reservation[]
+  mappings      ChannelMapping[]
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+}
+
+model Room {
+  id         String   @id @default(cuid())
+  roomType   RoomType @relation(fields: [roomTypeId], references: [id])
+  roomTypeId String
+  label      String
+  notes      String?
+}
+
+model RatePlan {
+  id                 String           @id @default(cuid())
+  roomType           RoomType         @relation(fields: [roomTypeId], references: [id])
+  roomTypeId         String
+  name               String
+  code               String           @unique
+  mealPlan           String?
+  cancellationPolicy String?
+  currency           String           @default("EUR")
+  rateDays           RateDay[]
+  mappings           ChannelMapping[]
+}
+
+model InventoryDay {
+  id         String   @id @default(cuid())
+  roomType   RoomType @relation(fields: [roomTypeId], references: [id])
+  roomTypeId String
+  date       DateTime @db.Date
+  allotment  Int      @default(0)
+  booked     Int      @default(0)
+  stopSell   Boolean  @default(false)
+
+  @@unique([roomTypeId, date])
+  @@index([date])
+}
+
+model RateDay {
+  id                String   @id @default(cuid())
+  ratePlan          RatePlan @relation(fields: [ratePlanId], references: [id])
+  ratePlanId        String
+  date              DateTime @db.Date
+  price             Decimal  @db.Decimal(10, 2)
+  minStay           Int?
+  maxStay           Int?
+  closedToArrival   Boolean  @default(false)
+  closedToDeparture Boolean  @default(false)
+
+  @@unique([ratePlanId, date])
+  @@index([date])
+}
+
+model Channel {
+  id           String           @id @default(cuid())
+  name         ChannelName
+  providerType ProviderType
+  enabled      Boolean          @default(true)
+  config       Json?
+  mappings     ChannelMapping[]
+  reservations Reservation[]
+  syncJobs     SyncJob[]
+  syncLogs     SyncLog[]
+  createdAt    DateTime         @default(now())
+}
+
+model ChannelMapping {
+  id             String   @id @default(cuid())
+  channel        Channel  @relation(fields: [channelId], references: [id])
+  channelId      String
+  roomType       RoomType @relation(fields: [roomTypeId], references: [id])
+  roomTypeId     String
+  ratePlan       RatePlan @relation(fields: [ratePlanId], references: [id])
+  ratePlanId     String
+  externalRoomId String
+  externalRateId String
+
+  @@unique([channelId, roomTypeId, ratePlanId])
+}
+
+model Guest {
+  id           String        @id @default(cuid())
+  firstName    String
+  lastName     String
+  email        String?
+  phone        String?
+  country      String?
+  notes        String?
+  reservations Reservation[]
+}
+
+model Reservation {
+  id                    String             @id @default(cuid())
+  channel               Channel            @relation(fields: [channelId], references: [id])
+  channelId             String
+  externalReservationId String
+  roomType              RoomType           @relation(fields: [roomTypeId], references: [id])
+  roomTypeId            String
+  guest                 Guest              @relation(fields: [guestId], references: [id])
+  guestId               String
+  checkIn               DateTime           @db.Date
+  checkOut              DateTime           @db.Date
+  status                ReservationStatus  @default(confirmed)
+  totalPrice            Decimal            @db.Decimal(10, 2)
+  currency              String             @default("EUR")
+  adults                Int                @default(1)
+  children              Int                @default(0)
+  rawPayload            Json?
+  documents             InternalDocument[]
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  @@unique([channelId, externalReservationId])
+  @@index([checkIn])
+  @@index([checkOut])
+}
+
+model InternalDocument {
+  id            String       @id @default(cuid())
+  reservation   Reservation  @relation(fields: [reservationId], references: [id])
+  reservationId String
+  number        String       @unique
+  issuedAt      DateTime     @default(now())
+  amount        Decimal      @db.Decimal(10, 2)
+  type          DocumentType
+  pdfPath       String?
+}
+
+model SyncJob {
+  id          String        @id @default(cuid())
+  type        SyncJobType
+  channel     Channel       @relation(fields: [channelId], references: [id])
+  channelId   String
+  payload     Json?
+  status      SyncJobStatus @default(pending)
+  attempts    Int           @default(0)
+  lastError   String?
+  scheduledAt DateTime      @default(now())
+  createdAt   DateTime      @default(now())
+
+  @@index([status, scheduledAt])
+}
+
+model SyncLog {
+  id        String        @id @default(cuid())
+  channel   Channel       @relation(fields: [channelId], references: [id])
+  channelId String
+  direction SyncDirection
+  event     String
+  status    String
+  payload   Json?
+  createdAt DateTime      @default(now())
+
+  @@index([channelId, createdAt])
+}
